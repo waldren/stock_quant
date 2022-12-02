@@ -8,15 +8,31 @@ import datetime
 from datetime import timedelta
 
 class BaseProcessor(ABC):
-    def __init__(self, symbol:str="", date:datetime='dt', open:str='open', high:str='high',
-                    low:str='low', close:str='close', volume:str='volume'):
+    def __init__(self, symbol:str="", date_col:str='dt', open_col:str='open', high_col:str='high',
+                    low_col:str='low', close_col:str='close', volume_col:str='volume'):
         self.symbol = symbol
-        self.date = date
-        self.open = open
-        self.high = high
-        self.low = low
-        self.close = close
-        self.volume = volume
+        self.date = date_col
+        self.open = open_col
+        self.high = high_col
+        self.low = low_col
+        self.close = close_col
+        self.volume = volume_col
+
+    # Yahoo Finance returns a datafrome with a datetime column not with the datetime as the index
+    # processors assume the index of the dataframe is the datetime data.
+    def ensure_datetime_index(self, df):
+        if isinstance(df.index, pd.DatetimeIndex):
+            return df
+        elif isinstance(df[self.date], pd.DatatimeIndex):
+                df['old_index'] = df.index
+                df.set_index(self.date)
+                return df
+        else:
+            raise Exception("The dataframe's index or date_col must be of type DatetimeIndex")
+    
+    @abstractmethod
+    def process(self, symbol, df) ->pd.DataFrame:
+        pass
     '''
     @abstractmethod
     def get_indicators(self, indicator:str) ->set(str):
@@ -143,7 +159,7 @@ class TestProcessor(BaseProcessor):
     def get_indicators(self, indicator: str) -> set(str):
         return self.indicators
     '''
-    def process(self, symbol, df):
+    def process(self, symbol, df) ->pd.DataFrame:
         self.symbol=symbol
         if df is None:
             return None
