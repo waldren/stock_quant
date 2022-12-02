@@ -1,0 +1,18 @@
+numpy
+numba
+pandas
+# technical analysis, indicator libraries
+ta
+# ta-lib
+# bta-lib
+pandas-ta
+# tulipy
+# broker API libraries
+tda-api
+cryptography
+# visualization
+plotly
+cufflinks
+# Webdriver
+chromedriver-binary
+
