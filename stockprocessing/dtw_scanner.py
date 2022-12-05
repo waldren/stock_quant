@@ -1,6 +1,7 @@
 # Source: https://medium.datadriveninvestor.com/creating-a-momentum-trading-scanner-with-dynamic-time-warping-2a4e7ceb1e1c
 
 import time
+from datetime import datetime 
 import numba as nb
 import numpy as np
 import pandas as pd
@@ -28,6 +29,7 @@ BREAKOUTS = [
     ['LAC', '2020-07-16', '2020-09-11'],
 ]
 
+
 # This says we are going to compare a time-series of length LENGTH to all the
 # breakout examples (which could be longer or shorter)
 LENGTH = 35
@@ -38,6 +40,10 @@ THRESHOLD = 12.23
 # Upper and lower dates limits for the plot
 PLOT_LOWER_DATE = '2019-10-01'
 PLOT_UPPER_DATE = '2020-10-01'
+DATE_FORMAT = '%Y-%m-%d'
+
+def getTimeSlice(df:pd.DataFrame, date_start, date_end)->pd.DataFrame:
+    return df.loc[date_start :date_end]
 
 
 @nb.jit(nopython = True)
@@ -149,12 +155,9 @@ def get_time_series(df: pd.DataFrame,
         The scaled time series
     '''
     
-    df = df[
-        (df['Date'] >= date_start)
-        & (df['Date'] <= date_end)        
-    ]
+    df = getTimeSlice(df, date_start, date_end)
     
-    return standard_scale(df['Close'].values)
+    return standard_scale(df['close'].values)
 
 
 @nb.jit(nopython = True)
@@ -201,7 +204,7 @@ def load_breakout_examples() -> list:
     
     for b in BREAKOUTS:
          
-        df = pd.read_csv(f'data/{b[0]}.csv')
+        df = pd.read_pickle(f'./data/stock_history/{b[0]}.pickle')
         breakouts.append(get_time_series(df, b[1], b[2]))
     
     return breakouts
@@ -251,35 +254,32 @@ def run_scanner(close: np.array,
 
 def plot_result(df: pd.DataFrame):
     
-    df = df[
-        (df['Date'] >= PLOT_LOWER_DATE)
-        & (df['Date'] <= PLOT_UPPER_DATE)
-    ]
+    df = getTimeSlice(df, PLOT_LOWER_DATE, PLOT_UPPER_DATE)
     
-    df = df.reset_index(drop = True)
+    #df = df.reset_index(drop = True)
     
     df.loc[:, 'breakout_region'] = np.where(
         df['filtered'],
-        df['High'].max(),
-        df['Low'].min(),
+        df['high'].max(),
+        df['low'].min(),
     )
     
     fig = go.Figure()
     
     fig.add_trace(
         go.Candlestick(
-            x = df['Date'],
-            open = df['Open'],
-            high = df['High'],
-            low = df['Low'],
-            close = df['Close'],
+            x = df.index,
+            open = df['open'],
+            high = df['high'],
+            low = df['low'],
+            close = df['close'],
             showlegend = False,        
         ),
     )
     
     fig.add_trace(
         go.Scatter(
-            x = df['Date'], 
+            x = df.index, 
             y = df['breakout_region'],
             fill = 'tonexty',
             fillcolor = 'rgba(0, 236, 109, 0.2)',
@@ -291,7 +291,7 @@ def plot_result(df: pd.DataFrame):
     
     fig.update_layout(
         xaxis = {'title': 'Date'},
-        yaxis = {'range': [df['Low'].min(), df['High'].max()], 'title': 'Price ($)'},
+        yaxis = {'range': [df['low'].min(), df['high'].max()], 'title': 'Price ($)'},
         title = 'TSLA - Breakout Candidates',
         width = 700,
         height = 700,
@@ -309,18 +309,20 @@ def plot_result(df: pd.DataFrame):
 
 if __name__ == '__main__':
     
-    df = pd.read_csv('TSLA.csv')
-    
+    #df = pd.read_csv('TSLA.csv')
+    df = pd.read_pickle('./data/stock_history/TSLA.pickle')
+    df = df [['open', 'high', 'low', 'close', 'volume']]
+    #df = getTimeSlice(df, PLOT_LOWER_DATE, PLOT_UPPER_DATE)
     t0 = time.time()
     
     candidates = run_scanner(
-        df['Close'].values,
+        df['close'].values,
         nb.typed.List(load_breakout_examples()),
         LENGTH,
         THRESHOLD,
     )
     
-    df = df[LENGTH:].reset_index(drop = True)
+    df = df[LENGTH:]
     df.loc[:, 'filtered'] = candidates
     
     print('Number of scans performed:', len(df) - LENGTH)
