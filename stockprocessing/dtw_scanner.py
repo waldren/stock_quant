@@ -5,6 +5,7 @@ from datetime import datetime
 import numba as nb
 import numpy as np
 import pandas as pd
+import json 
 
 from typing import Tuple
 
@@ -32,15 +33,14 @@ BREAKOUTS = [
 
 # This says we are going to compare a time-series of length LENGTH to all the
 # breakout examples (which could be longer or shorter)
-LENGTH = 35
+LENGTH = 60 #35
 
 # Upper DTW cost threshold to be considered as a breakout candidate
-THRESHOLD = 12.23
+THRESHOLD = 27 #12.23
 
 # Upper and lower dates limits for the plot
 PLOT_LOWER_DATE = '2019-10-01'
 PLOT_UPPER_DATE = '2020-10-01'
-DATE_FORMAT = '%Y-%m-%d'
 
 def getTimeSlice(df:pd.DataFrame, date_start, date_end)->pd.DataFrame:
     return df.loc[date_start :date_end]
@@ -189,6 +189,23 @@ def get_avg_cost(ts: np.array, breakouts: list) -> float:
             
     return np.mean(np.array(costs))
 
+def add_dashes(date:str)->str:
+    return f'{date[:4]}-{date[4:6]}-{date[6:]}'
+
+def load_breakout_my_examples()-> list:
+    breakouts = []
+    bo_json = None
+    with open('./data/breakouts.json') as jf:
+        bo_json = json.load(jf)
+    
+    if not bo_json is None:
+        for b in bo_json['breakouts']:
+            df = pd.read_pickle(f'./data/stock_history/{b["symbol"]}.pickle')
+            d1 = b["prior_move"][0]
+            d2 = b['breakout_date']
+            breakouts.append(get_time_series(df, add_dashes(d1), add_dashes(d2)))
+    
+    return breakouts
 
 def load_breakout_examples() -> list:
     '''
@@ -254,7 +271,7 @@ def run_scanner(close: np.array,
 
 def plot_result(df: pd.DataFrame):
     
-    df = getTimeSlice(df, PLOT_LOWER_DATE, PLOT_UPPER_DATE)
+    #df = getTimeSlice(df, PLOT_LOWER_DATE, PLOT_UPPER_DATE)
     
     #df = df.reset_index(drop = True)
     
@@ -311,13 +328,14 @@ if __name__ == '__main__':
     
     #df = pd.read_csv('TSLA.csv')
     df = pd.read_pickle('./data/stock_history/TSLA.pickle')
+    df = df.loc['20150101' : '20190101']
     df = df [['open', 'high', 'low', 'close', 'volume']]
-    #df = getTimeSlice(df, PLOT_LOWER_DATE, PLOT_UPPER_DATE)
+
     t0 = time.time()
     
     candidates = run_scanner(
         df['close'].values,
-        nb.typed.List(load_breakout_examples()),
+        nb.typed.List(load_breakout_my_examples()),
         LENGTH,
         THRESHOLD,
     )

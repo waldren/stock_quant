@@ -51,8 +51,8 @@ def download_list():
         if i%100 == 0:
             print("Sleeping for additional 50s...")
             time.sleep(50)
-        print (f'Getting Hx for {s}')
-        save_history(s, td.get_price_daily_history(s))
+        
+        download_single(td, s)
 
     print ('************')
     print (f'Processed {i} stocks')
@@ -60,7 +60,19 @@ def download_list():
 
 def download_single( td, symbol):
     print (f'Getting Hx for {symbol}')
-    save_history(symbol, td.get_price_daily_history(symbol))
+    df = td.get_price_daily_history(symbol)
+    if df.empty:
+        print("Trying for only 10 year")
+        df = td.get_price_daily_history(symbol, period=td.get_year_period(10))
+    if df.empty:
+        print("Trying for only 5 year")
+        df = td.get_price_daily_history(symbol, period=td.get_year_period(5))
+    if not df.empty:
+        print("Saving history.....")
+        save_history(symbol,df)
+    else:
+        print("Saving empty placeholder...")
+        save_history(f"_{symbol}", df)
 
 if __name__ == '__main__':
     config = None
@@ -68,4 +80,4 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
 
     td = Client(config)
-    download_single(td, 'LAC')
+    download_single(td, 'HTHT')
