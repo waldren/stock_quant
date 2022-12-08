@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 import scipy.signal as sig 
+import logging 
 
 from .baseprocessors import BaseProcessor
 from stockprocessing import grove_functions as gf
@@ -14,14 +15,22 @@ class BreakoutProcessor(BaseProcessor):
         # Parameters
         self.prv_brkout_thr = 2 #percent  1 = 100%
         self.pullback_pct   = -0.2
+        self.consolidation_pct_chg = 0.02
+        self.consolidation_window = 5
+        self.lookback_period = 5
+        self.lookforward_period = 5
+        self.big_move_percentage = 10
+        self.peak_width = 3 #Used by scipy find_peaks_cwt for the expected peak width
+        self.extrema_chunk_size = 90 # window used to look for peaks and troughs
 
         # Call the percent change column using the same OHLCV naming
-        self.close_pct_chg_col = "{}_pct_chg".format(self.close)
-        self.open_pct_chg_col = "{}_pct_chg".format(self.open)
-        self.low_pct_chg_col = "{}_pct_chg".format(self.low)
-        self.high_pct_chg_col = "{}_pct_chg".format(self.high)
+        self.close_pct_chg = "{}_pct_chg".format(self.close)
+        self.open_pct_chg = "{}_pct_chg".format(self.open)
+        self.low_pct_chg = "{}_pct_chg".format(self.low)
+        self.high_pct_chg = "{}_pct_chg".format(self.high)
+        self.volume_pct_chg = "{}_pct_chg".format(self.volume)
 
-    def apply_moav(self, df):
+    def apply_moav(self, df)->pd.DataFrame:
         if df is None:
             print("apply_moavs: dataframe is None")
             return df 
@@ -45,10 +54,11 @@ class BreakoutProcessor(BaseProcessor):
         '''
         return (df[self.high]+df[self.low])/2 * df[self.volume]
     
-    def _mark_bigmoves(self, df):
-        if df['peaks'] == 1 and df['growth']>= self.prv_brkout_thr:
+    #TODO this needs to be fixed
+    def _mark_bigmoves(self, df, threshold_percent):
+        if df['peaks'] == 1 and df['growth']>= threshold_percent:
             return 1
-        elif df['troughs'] == 1 and abs(df['growth']) >= self.prv_brkout_thr:
+        elif df['troughs'] == 1 and abs(df['growth']) >= threshold_percent:
             return -1
         else:
             return 0
@@ -58,20 +68,67 @@ class BreakoutProcessor(BaseProcessor):
         if df is None:
             print("apply_extrema: df is None")
             return df 
-        close = df[self.close]
-        df = self._find_peaks(close, 'peaks', df)
-        close = close.mul(-1)
-        df = self._find_peaks(close, 'troughs', df)
-        return df
+        # If we do not break up the dataframe the larger future growth
+        # will interfere with peak identification in the more distant past
+        frames = []
+        chunk_size = self.extrema_chunk_size 
+        for start in range(0, df.shape[0], chunk_size):
+            df_subset = df.iloc[start:start + chunk_size].copy()
+            close = df_subset[self.close]
+            df_subset = self._find_peaks(close, 'peaks', df_subset)
+            close = close.mul(-1)
+            df_subset = self._find_peaks(close, 'troughs', df_subset)
+            frames.append(df_subset)
+        return pd.concat(frames)
+
     def _find_peaks(self, close, col_name, df):
-        peaks, dic = sig.find_peaks(close)
+        peaks = sig.find_peaks_cwt(close, 3)
+        pw_half = sig.peak_widths(close, peaks, rel_height=0.5)
+        pw_full = sig.peak_widths(close, peaks, rel_height=1)
+
         v = np.zeros(df.shape[0])
-        h = np.zeros(df.shape[0])
+        ph = np.zeros(df.shape[0])
+        pf = np.zeros(df.shape[0])
         j = 0
-        for i in peaks:
-            v[i] = 1
+        for t in zip(peaks, pw_half[0], pw_full[0]):
+            idx = t[0]
+            hw = int(t[1]/2)
+            fw = int(t[2]/2)
+            if fw > 0:
+                v[idx] = 1
+                ph[idx-hw:idx+hw] = 1
+                pf[idx-fw:idx+fw] = 1
+            else:
+                logging.warning(f'Zero Width Peak at: {idx}')
         df[col_name] = v
+        df[f'{col_name}_halfwidth'] = ph
+        df[f'{col_name}_fullwidth'] = pf
         
+        return df
+
+
+    def in_consolidation(self, df, percentage=0.02, window=15):
+        max_prior = "max_prior_{}".format(window)
+        min_prior = "min_prior_{}".format(window)
+        df[max_prior] = df[self.close].rolling(window).max()
+        df[min_prior] = df[self.close].rolling(window).min()
+
+        threshold = 1 -percentage
+        df['in_consolidation']  = df[min_prior] > (df[max_prior] * threshold)
+        return df 
+
+    def calculate_precent_changes(self, df:pd.DataFrame)->pd.DataFrame:
+        df[self.close_pct_chg] = df[self.close].pct_change(fill_method='ffill')
+        df[self.open_pct_chg] = df[self.open].pct_change(fill_method='ffill')
+        df[self.low_pct_chg] = df[self.low].pct_change(fill_method='ffill')
+        df[self.high_pct_chg] = df[self.high].pct_change(fill_method='ffill')
+        df[self.volume_pct_chg] = df[self.volume].pct_change(fill_method='ffill')
+        return df 
+
+    def calculate_growth(self, df)->pd.DataFrame:
+        df['growth'] = df[self.close_pct_chg].cumsum()
+        df = self.in_consolidation(df, percentage=self.consolidation_pct_chg, window=self.consolidation_window)
+        #df = self._mark_bigmoves(df, self.big_move_percentage)
         return df
 
     def apply_volume_indicators(self, df:pd.DataFrame)->pd.DataFrame:
@@ -89,14 +146,16 @@ class BreakoutProcessor(BaseProcessor):
     def apply_growth_consolidation(self, df:pd.DataFrame)->pd.DataFrame:
         #get the close price
         prices = df[self.close]
-        df.loc[:, 'consolidating'] = gf.find_consolidation(prices.values)
-        df.loc[:, 'trend_filter'] = gf.trend_filter(prices)
-        df.loc[:, 'filtered'] = np.where(
-            df['consolidating'] + df['trend_filter'] == 2,
+        df.loc[:, 'consolidating'] = gf.find_consolidation(prices.values, days_to_smooth= 20,
+                       perc_change_days = 5, perc_change_thresh=self.consolidation_pct_chg, check_days= 5)
+        df.loc[:, 'dg_trend_filter'] = gf.trend_filter(prices)
+        df.loc[:, 'dg_filtered'] = np.where(
+            df['consolidating'] + df['dg_trend_filter'] == 2,
             True,
             False,
         ) 
         return df 
+    
     
     def apply_adx_indicator(self, df:pd.DataFrame)->pd.DataFrame:
         a = ta.adx(df[self.high], df[self.low], df[self.close], length = 14)
@@ -112,17 +171,20 @@ class BreakoutProcessor(BaseProcessor):
             print("Cannot process: df is empty")
             return df 
         self.symbol = symbol
+        df = self.calculate_precent_changes(df)
         df = self.apply_moav(df)
         df = self.apply_volume_indicators(df)
         df = self.apply_range_indicators(df)
         df = self.find_extrema(df)
+        df = self.calculate_growth(df)
         df = self.apply_adx_indicator(df)
         df = self.apply_growth_consolidation(df)
         return df 
     
     def process_check(self, df:pd.DataFrame) -> int:
         #grab a column name from each function
-        indicators = set(["10sma", "vol_avg", "adr_pct", "peaks", "adx_14", "consolidating"])
+        indicators = set([self.close_pct_chg, "10sma", "vol_avg", "adr_pct", 
+                            "peaks", "adx_14", "dg_consolidating"])
         try:
             if df.empty:
                 return -1

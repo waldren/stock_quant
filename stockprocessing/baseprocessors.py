@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import numpy as np
 import pandas as pd
 import os
 import pickle
@@ -29,7 +30,14 @@ class BaseProcessor(ABC):
                 return df
         else:
             raise Exception("The dataframe's index or date_col must be of type DatetimeIndex")
-    
+
+    def create_shaded_col(self, df, filter_col, high, low)->np.array:
+        return np.where(
+                df[filter_col].values,
+                high,
+                low,
+                )
+
     @abstractmethod
     def process(self, symbol, df) ->pd.DataFrame:
         pass
@@ -126,6 +134,9 @@ class SqueezeProcessor(BaseProcessor):
 
     def chart(self, symbol, df):
         print(self.date)
+
+        df['shaded'] = self.create_shaded_col(df, 'TTM_squeeze', df[self.high].max(), 0)
+
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02)
         fig.add_trace( go.Candlestick(x=df.index, open=df[self.open], high=df[self.high], low=df[self.low], close=df[self.close]), row=1, col=1)
         fig.add_trace( go.Scatter(
@@ -135,7 +146,12 @@ class SqueezeProcessor(BaseProcessor):
         fig.add_trace( go.Scatter(x=df.index, y=df['upper_keltner'], name='Upper Keltner Channel', line={'color': 'blue'}), row=1, col=1)
         fig.add_trace( go.Scatter(x=df.index, y=df['lower_keltner'], name='Lower Keltner Channel', line={'color': 'blue'}), row=1, col=1)
         #fig.add_trace( go.Bar(name='Momentum', x=df.index, y=df['mom_hist'] ), row=2, col=1)
-        fig.add_trace( go.Bar(name="TTM", x=df.index, y=df['TTM_squeeze'] ), row=2, col=1)
+        fig.add_trace( go.Candlestick(x=df.index, open=df[self.open], high=df[self.high], low=df[self.low], close=df[self.close]), row=2, col=1)
+        fig.add_trace( go.Scatter(x = df.index, y = df['shaded'],
+                fill = 'tonexty', fillcolor = 'rgba(255, 0, 0, 0.2)',
+                mode = 'lines', line = {'width': 0, 'shape': 'hvh'},
+                showlegend = False,), row=2, col=1
+                )
         fig.layout.xaxis.type = 'category'
         fig.layout.xaxis.rangeslider.visible = False
         fig.update_layout(height=800, width=1500, title_text="Squeeze Scan for {}".format(symbol))

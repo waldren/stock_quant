@@ -73,9 +73,13 @@ class Client:
         df['datetime'] = pd.to_datetime(df['datetime'], unit='ms', utc=True)
         df.set_index('datetime', inplace=True, drop=True)
         return df
+
     def get_price_history(self, **kwargs):
         # call the TD API and grab the json
         r = self.td.get_price_history(**kwargs)
+        return self._process_api_result(r)
+
+    def _process_api_result(self, r):
         j = r.json()
         # Make sure there are candles to know that it is not an error
         if 'candles' not in j:
@@ -134,4 +138,14 @@ class Client:
         end_datetime = datetime.datetime.now()
         return self.get_price_history(symbol=symbol,end_datetime=end_datetime, start_datetime=start_datetime,frequency_type=frequency_type,frequency=frequency)
     
-    
+    '''
+    Function to get a standand daily candles for the supplied period. Period type 
+    is `YEAR`
+    '''
+    def get_price_daily_history_by_range(self, symbol, startDate:datetime, endDate:datetime):
+        r = self.td.get_price_history_every_day(symbol=symbol, start_datetime=startDate, end_datetime=endDate)
+        return self._process_api_result(r)
+   
+
+    def _unix_time_millis(self, dt):
+        return (dt - datetime.datetime.utcfromtimestamp(0)).total_seconds() * 1000.0
