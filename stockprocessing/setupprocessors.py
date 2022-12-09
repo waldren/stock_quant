@@ -54,14 +54,6 @@ class BreakoutProcessor(BaseProcessor):
         '''
         return (df[self.high]+df[self.low])/2 * df[self.volume]
     
-    #TODO this needs to be fixed
-    def _mark_bigmoves(self, df, threshold_percent):
-        if df['peaks'] == 1 and df['growth']>= threshold_percent:
-            return 1
-        elif df['troughs'] == 1 and abs(df['growth']) >= threshold_percent:
-            return -1
-        else:
-            return 0
     ################################
 
     def find_extrema(self, df):
@@ -70,6 +62,8 @@ class BreakoutProcessor(BaseProcessor):
             return df 
         # If we do not break up the dataframe the larger future growth
         # will interfere with peak identification in the more distant past
+        #TODO The slicing of the dataframe is arbitrary. Probably need to look 
+        #     for a more emperic method to determin break points. 
         frames = []
         chunk_size = self.extrema_chunk_size 
         for start in range(0, df.shape[0], chunk_size):
@@ -79,30 +73,41 @@ class BreakoutProcessor(BaseProcessor):
             close = close.mul(-1)
             df_subset = self._find_peaks(close, 'troughs', df_subset)
             frames.append(df_subset)
-        return pd.concat(frames)
+        df = pd.concat(frames)
+        
+        #TODO try to use .shift(-full width)
+        # Convert Prominences to percent moves
+        df['peaks_prct_move'] = np.where(df['peaks'] == 1, df[self.close]/(df[self.close]-df['peaks_prominence']) ,0)
+        df['troughs_prct_move'] = np.where(df['troughs'] == 1, df[self.close]/(df[self.close]+df['troughs_prominence']) ,0)
+        
+        return df
 
     def _find_peaks(self, close, col_name, df):
         peaks = sig.find_peaks_cwt(close, 3)
-        pw_half = sig.peak_widths(close, peaks, rel_height=0.5)
-        pw_full = sig.peak_widths(close, peaks, rel_height=1)
+        pw_half = sig.peak_widths(close, peaks, rel_height=0.5)[0]
+        pw_full = sig.peak_widths(close, peaks, rel_height=1)[0]
+        prom = sig.peak_prominences(close, peaks)[0]
 
         v = np.zeros(df.shape[0])
+        pr = np.zeros(df.shape[0])
         ph = np.zeros(df.shape[0])
         pf = np.zeros(df.shape[0])
         j = 0
-        for t in zip(peaks, pw_half[0], pw_full[0]):
+        for t in zip(peaks, pw_half, pw_full, prom):
             idx = t[0]
             hw = int(t[1]/2)
             fw = int(t[2]/2)
-            if fw > 0:
+            if t[2] > 0 and t[3] > 0:
                 v[idx] = 1
-                ph[idx-hw:idx+hw] = 1
-                pf[idx-fw:idx+fw] = 1
+                ph[idx] = t[1]
+                pf[idx] = t[2]
+                pr[idx] = t[3] 
             else:
-                logging.warning(f'Zero Width Peak at: {idx}')
+                logging.warning(f'Rejected peak {idx} with {t[2]} Width and {t[3]} Prominence')
         df[col_name] = v
         df[f'{col_name}_halfwidth'] = ph
         df[f'{col_name}_fullwidth'] = pf
+        df[f'{col_name}_prominence'] = pr 
         
         return df
 

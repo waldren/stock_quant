@@ -21,7 +21,7 @@ def chart(symbol:str, df:pd.DataFrame):
 
         df.loc[:, 'breakout_region'] = create_shaded_col(df, 'filtered', df['high'].max(), df['low'].min())
     
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.02)
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02)
         fig.add_trace( go.Candlestick(x=df.index, name=symbol, open=df['open'], high=df['high'], 
                         low=df['low'], close=df['close']), row=1, col=1)
         '''               
@@ -44,6 +44,8 @@ def chart(symbol:str, df:pd.DataFrame):
                 mode = 'lines', line = {'width': 0, 'shape': 'hvh'},
                 showlegend = False,), row=1, col=1
                 )
+        fig.add_trace(go.Line(name="% Up Move", x=df.index, y=df['peaks_prct_move']), row=2, col=1)
+        fig.add_trace(go.Line(name="% Down Move", x=df.index, y=df['troughs_prct_move']), row=2, col=1)
         #fig.layout.xaxis.type = 'category'
         #fig.layout.xaxis.rangeslider.visible = False
         fig.update_layout(
@@ -51,7 +53,7 @@ def chart(symbol:str, df:pd.DataFrame):
             yaxis = {'range': [df['low'].min(), df['high'].max()], 'title': 'Price ($)'},
             title = f'{symbol} - Breakout Candidates',
             width = 1500,
-            height = 1800
+            height = 800
         )
         
         fig.update_xaxes(
@@ -81,7 +83,7 @@ if __name__ == "__main__":
     #history.loc[history['adx_14'] < 14, 'adx_below'] = 1
 
     history.loc[:, 'shaded'] = create_shaded_col(history, 'peaks', history['high'].max(), history['low'].min())
-    history.loc[:, 'shaded2'] = create_shaded_col(history, 'peaks_fullwidth', history['high'].max(), history['low'].min())
+    history.loc[:, 'shaded2'] = create_shaded_col(history, 'troughs', history['high'].max(), history['low'].min())
 
     trunc_hx = history.loc['2018-01-01':'2021-12-31']
     #tmp = trunc_hx.select_dtypes(include=[np.number])
