@@ -3,6 +3,7 @@ import pandas as pd
 import pandas_ta as ta
 import scipy.signal as sig 
 import logging 
+import warnings
 
 from .baseprocessors import BaseProcessor
 from stockprocessing import grove_functions as gf
@@ -15,13 +16,18 @@ class BreakoutProcessor(BaseProcessor):
         # Parameters
         self.prv_brkout_thr = 2 #percent  1 = 100%
         self.pullback_pct   = -0.2
-        self.consolidation_pct_chg = 0.02
-        self.consolidation_window = 5
+        self.consolidation_pct_chg = 0.05
+        self.consolidation_window = 3
         self.lookback_period = 5
         self.lookforward_period = 5
         self.big_move_percentage = 10
-        self.peak_width = 3 #Used by scipy find_peaks_cwt for the expected peak width
+        self.use_cwt = False 
+        self.peak_min_height = 1 #Used by scipy find_peaks to filter out peaks by height
+        self.peak_min_distance = 14 # the minimum distance between peaks 
+        self.peak_width = np.arange(2,14) #Used by scipy find_peaks_cwt for the expected peak width
         self.extrema_chunk_size = 90 # window used to look for peaks and troughs
+        self.pw_threshold =  1.5 
+        self.prom_threshold = 0.9
 
         # Call the percent change column using the same OHLCV naming
         self.close_pct_chg = "{}_pct_chg".format(self.close)
@@ -81,29 +87,41 @@ class BreakoutProcessor(BaseProcessor):
         df['troughs_prct_move'] = np.where(df['troughs'] == 1, df[self.close]/(df[self.close]+df['troughs_prominence']) ,0)
         
         return df
-
+         
     def _find_peaks(self, close, col_name, df):
-        peaks = sig.find_peaks_cwt(close, 3)
-        pw_half = sig.peak_widths(close, peaks, rel_height=0.5)[0]
-        pw_full = sig.peak_widths(close, peaks, rel_height=1)[0]
-        prom = sig.peak_prominences(close, peaks)[0]
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="some peaks have.*")
+            if self.use_cwt:
+                peaks = sig.find_peaks_cwt(close, self.peak_width)
+            else:
+                peaks = sig.find_peaks(close, distance=self.peak_min_distance, 
+                                prominence=self.prom_threshold, width=self.pw_threshold)[0]
 
+            pw_half = sig.peak_widths(close, peaks, rel_height=0.5)[0]
+            pw_full = sig.peak_widths(close, peaks, rel_height=1)[0]
+            prom = sig.peak_prominences(close, peaks)[0]
+
+        logging.debug(f'Mean(std):  {round(pw_full.mean(), 3)}({round(pw_full.std(), 3)}) Width and {round(prom.mean(), 3)}({round(prom.std(), 3)}) Prominence')
+        
         v = np.zeros(df.shape[0])
         pr = np.zeros(df.shape[0])
         ph = np.zeros(df.shape[0])
         pf = np.zeros(df.shape[0])
         j = 0
+        dt = df.index.values
         for t in zip(peaks, pw_half, pw_full, prom):
             idx = t[0]
             hw = int(t[1]/2)
             fw = int(t[2]/2)
-            if t[2] > 0 and t[3] > 0:
+            # Exclude peaks less than width and prominence thresholds
+            if t[2] > self.pw_threshold and t[3] > self.prom_threshold:
                 v[idx] = 1
                 ph[idx] = t[1]
                 pf[idx] = t[2]
                 pr[idx] = t[3] 
             else:
-                logging.warning(f'Rejected peak {idx} with {t[2]} Width and {t[3]} Prominence')
+                if t[3] != 0:
+                    logging.warning(f'Rejected peak {dt[idx]} with {t[2]} Width and {t[3]} Prominence')
         df[col_name] = v
         df[f'{col_name}_halfwidth'] = ph
         df[f'{col_name}_fullwidth'] = pf
@@ -122,7 +140,17 @@ class BreakoutProcessor(BaseProcessor):
         df['in_consolidation']  = df[min_prior] > (df[max_prior] * threshold)
         return df 
 
-    def calculate_precent_changes(self, df:pd.DataFrame)->pd.DataFrame:
+    def calculate_percent_changes(self, df:pd.DataFrame)->pd.DataFrame:
+        """
+        Calculates the percent change for the OHLCV columns and adds "{column}.pct_change"
+        to the data frame
+
+        Args:
+            df (pd.DataFrame): Dataframe that contains the OHLCV columns
+
+        Returns:
+            pd.DataFrame: The original dataframe with the additional "pct_change" columns
+        """
         df[self.close_pct_chg] = df[self.close].pct_change(fill_method='ffill')
         df[self.open_pct_chg] = df[self.open].pct_change(fill_method='ffill')
         df[self.low_pct_chg] = df[self.low].pct_change(fill_method='ffill')
@@ -176,7 +204,7 @@ class BreakoutProcessor(BaseProcessor):
             print("Cannot process: df is empty")
             return df 
         self.symbol = symbol
-        df = self.calculate_precent_changes(df)
+        df = self.calculate_percent_changes(df)
         df = self.apply_moav(df)
         df = self.apply_volume_indicators(df)
         df = self.apply_range_indicators(df)
