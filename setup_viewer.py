@@ -77,21 +77,28 @@ def chart(symbol:str, df:pd.DataFrame):
         fig.show()
 
 def mark_peak_widths(fig:Figure, df:pd.DataFrame)-> pd.DataFrame:
-    lookback_period = 7
+    lookback_period = 3
     df_peaks = df.query("peaks == 1 and peaks_prct_move > 1.1")
     for index, row in df_peaks.iterrows():
         pk_start = index- timedelta(row['peaks_fullwidth'])
-        fig.add_vrect(x0=pk_start, x1=index+ timedelta(row['peaks_fullwidth']), line_width=1, fillcolor="green", opacity=0.2)
+        fig.add_vrect(x0=pk_start, x1=index+ timedelta(row['peaks_fullwidth']), line_width=1, fillcolor="green", opacity=0.1)
         
-        consolidate_end = pk_start -timedelta(1)
-        consolidate_start = pk_start - timedelta(lookback_period)
-        df_test = df.loc[consolidate_start.strftime('%Y-%m-%d'):consolidate_end.strftime('%Y-%m-%d')]
-        
-        is_consolidating = has_lower_highs_and_higher_lows(df_test['high'].to_numpy(), df_test['low'].to_numpy())
-        if is_consolidating:
-            fig.add_vrect(x0=consolidate_start, x1=consolidate_end, 
-                        line_width=1, fillcolor="yellow", opacity=0.2 )
+        step_size = lookback_period
+        max_steps = 5
 
+        consolidate_end = pk_start -timedelta(1)
+        df_test = df.loc[:consolidate_end.strftime('%Y-%m-%d')]
+        max_consolidation = find_consolidation(df_test['high'].to_numpy(), df_test['low'].to_numpy(), step_size=step_size, max_steps=max_steps)
+        if max_consolidation > 0:
+            fig.add_vrect(x0=consolidate_end-timedelta(max_consolidation), x1=consolidate_end, 
+                        line_width=1, fillcolor="yellow", opacity=0.2 )
+        
+        # Check for Volume Spike
+        df_test = df.loc[pk_start:index]
+        vol_spike = where_volume_spike(df_test['volume_pct_chg'].to_numpy())
+        if vol_spike >= 0:
+            vol_idx = df.index[vol_spike]
+            fig.add_vrect(x0=vol_idx, x1=vol_idx, line_width=1, fillcolor="blue", opacity=0.2 )
 
 def fit_to_line(y:np.array):
     x = np.arange(1,len(y)+1)
@@ -99,10 +106,10 @@ def fit_to_line(y:np.array):
 
 def has_lower_highs_and_higher_lows(high:np.array, low:np.array):
     hi_res = fit_to_line(high)
-    #logging.warning(f"High Slope is {hi_res.slope}")
+    logger.debug(f"High Slope is {hi_res.slope}")
     if hi_res.slope < 0:
         lo_res = fit_to_line(low)
-        #logging.warning(f"Low Slope is {lo_res.slope}")
+        logger.debug(f"Low Slope is {lo_res.slope}")
         if lo_res.slope > 0:
             return True
         else:
@@ -110,15 +117,55 @@ def has_lower_highs_and_higher_lows(high:np.array, low:np.array):
     else:
         return False
 
+def find_consolidation(high:np.array, low:np.array, step_size=5, max_steps=5)-> int:
+    """
+    Check for consolidation via lower highs and higher lows in steps backward.
+
+    Args:
+        high (np.array): array of high prices
+        low (np.array):  array of low prices
+        step_size (int, optional): Number of trading days to look back per step. Defaults to 5.
+        max_steps (int, optional): Maximum number of steps to take back. Defaults to 5.
+
+    Returns:
+        int: Number of trading days (in multiple of step_size) that there is consolidation. 0 = no consolidation
+    """
+    current_end = -1
+    max_consolidation = 0
+    stop_after = -step_size*max_steps
+    for x in range (1,max_steps):
+        current_start = current_end - step_size
+        if current_start < stop_after:
+            logger.debug(f'{max_consolidation} bars of consolidation in {x} steps')
+            return max_consolidation
+        #Check current range for consolidation
+        if has_lower_highs_and_higher_lows(high=high[current_start:current_end], low=low[current_start:current_end]):
+            max_consolidation = -current_start
+            current_end = current_start
+        else:
+            logger.debug(f'{max_consolidation} bars of consolidation in {x} steps')
+            return max_consolidation
+    logger.debug(f'{max_consolidation} bars of consolidation in {x} steps')
+    return max_consolidation
 
 
+def where_volume_spike(volume_prct_change:np.array)-> int:
+    for i, v in enumerate(volume_prct_change):
+        if v > 0.3:
+            return i
+    return -1
 if __name__ == "__main__":
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    logging.basicConfig(filename='./app.log', filemode='w', 
+                    format='%(name)s - %(levelname)s - %(message)s')
+    logger.info(f'Run time is {datetime.datetime.now()}')
 
     symbol = 'ETSY'
+    logger.info(f'Analyzing ticker: {symbol}')
     dir = './data/stock_history'
 
     filename = f'{symbol}.pickle'  #utils.get_random_file(dir)
-    print("Showing file: {}".format(filename))
 
     history = None 
     with open(f"{dir}/{filename}", 'rb') as handle:
@@ -128,7 +175,7 @@ if __name__ == "__main__":
     stime = time.perf_counter()
     history = bp.process(symbol, history)
     etime = time.perf_counter()
-    print(f'Breakoutprocessor took {etime-stime} secs.')
+    logger.info(f'Breakoutprocessor took {etime-stime} secs.')
 
     # Create a new columen for ADX below 14
     #history['adx_below'] = np.zeros(len(history))

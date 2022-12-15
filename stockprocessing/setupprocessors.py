@@ -130,14 +130,18 @@ class BreakoutProcessor(BaseProcessor):
         return df
 
 
-    def in_consolidation(self, df, percentage=0.02, window=15):
-        max_prior = "max_prior_{}".format(window)
-        min_prior = "min_prior_{}".format(window)
-        df[max_prior] = df[self.close].rolling(window).max()
-        df[min_prior] = df[self.close].rolling(window).min()
+    def in_consolidation(self, df:pd.DataFrame, percentage=0.02):
+        in_range = "in_consolidation_range"
+        consol = "in_consolidation"
 
         threshold = 1 -percentage
-        df['in_consolidation']  = df[min_prior] > (df[max_prior] * threshold)
+        df[in_range]  = df.apply(lambda x: 1 if df[self.low] > (df[self.high] * threshold) else 0)
+        df[consol] = df[in_range]
+        
+        x0 = 0.0
+        for i, row in df.iterrows():
+            row[in_range] = x0*row[in_range] + row[in_range]
+            x0 = row[in_range]
         return df 
 
     def calculate_percent_changes(self, df:pd.DataFrame)->pd.DataFrame:
