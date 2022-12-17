@@ -1,8 +1,11 @@
 import pandas as pd
 import numpy as np
+import pickle
 import time
 import yaml
 import datetime
+from scipy.stats import linregress as lr
+
 from stockprocessing.baseprocessors import SqueezeProcessor, TestProcessor
 
 def testSqueeze(df):
@@ -60,10 +63,37 @@ def process_data(df, i)->pd.DataFrame:
     df['TEST'] = df['TEST'].apply(lambda x: x*-1)
     return df
 
+def calc_slope(x):
+    slope = np.polyfit(range(len(x)), x, 1)[0]
+    return slope
+
+def fit_to_line(y:np.array):
+    x = np.arange(1,len(y)+1)
+    return lr(x, y=y).slope
+
+def test_rolling_slope(df):
+
+    df['slope_5'] = df['close'].rolling(5,min_periods=5).apply(calc_slope,raw=False)        
+    df['slope_20']= df['close'].rolling(20,min_periods=20).apply(calc_slope,raw=False)  
+    return df
+
+def getstock(symbol)->pd.DataFrame:
+    dir = './data/stock_history'
+
+    filename = f'{symbol}.pickle'  #utils.get_random_file(dir)
+ 
+    with open(f"{dir}/{filename}", 'rb') as handle:
+        history = pickle.load(handle)
+    return history
+
+def truncate(df:pd.DataFrame, sdate, edate, keep_cols)->pd.DataFrame:
+    return df.loc[sdate:edate][keep_cols]
 
 if __name__ == '__main__':
-    df = pd.DataFrame([1,2,3,4,5,6,7,8,9,10,11,12], columns=['TEST'])
+    df = getstock('ETSY')
     print(f'Initial length is {len(df)}')
-    df = test_chunk_dataframe(df)
-    print(f'Post length is {len(df)}')
-    print(df)
+    keep_cols = ['close', 'slope_5', 'slope_20']
+
+    df = test_rolling_slope(df)
+    df = truncate(df, '2018-01-01', '2021-12-31', keep_cols)
+    df.to_csv('./test_rolling.csv')

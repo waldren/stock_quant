@@ -13,10 +13,13 @@ class BreakoutProcessor(BaseProcessor):
                 , low_col: str = 'low', close_col: str = 'close', volume_col: str = 'volume'):
         super().__init__(symbol, date_col, open_col, high_col, low_col, close_col, volume_col)
 
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)
+
         # Parameters
         self.prv_brkout_thr = 2 #percent  1 = 100%
         self.pullback_pct   = -0.2
-        self.consolidation_pct_chg = 0.05
+        self.consolidation_pct_chg = 0.02
         self.consolidation_window = 3
         self.lookback_period = 5
         self.lookforward_period = 5
@@ -60,6 +63,9 @@ class BreakoutProcessor(BaseProcessor):
         '''
         return (df[self.high]+df[self.low])/2 * df[self.volume]
     
+    def _calc_slope(self, x):
+        slope = np.polyfit(range(len(x)), x, 1)[0]
+        return slope
     ################################
 
     def find_extrema(self, df):
@@ -101,7 +107,7 @@ class BreakoutProcessor(BaseProcessor):
             pw_full = sig.peak_widths(close, peaks, rel_height=1)[0]
             prom = sig.peak_prominences(close, peaks)[0]
 
-        logging.debug(f'Mean(std):  {round(pw_full.mean(), 3)}({round(pw_full.std(), 3)}) Width and {round(prom.mean(), 3)}({round(prom.std(), 3)}) Prominence')
+        self.logger.debug(f'[{self.symbol}-{df.index[0]}:{df.index[-1]} {col_name}] - Mean(std):  {round(pw_full.mean(), 3)}({round(pw_full.std(), 3)}) Width and {round(prom.mean(), 3)}({round(prom.std(), 3)}) Prominence')
         
         v = np.zeros(df.shape[0])
         pr = np.zeros(df.shape[0])
@@ -134,14 +140,19 @@ class BreakoutProcessor(BaseProcessor):
         in_range = "in_consolidation_range"
         consol = "in_consolidation"
 
-        threshold = 1 -percentage
-        df[in_range]  = df.apply(lambda x: 1 if df[self.low] > (df[self.high] * threshold) else 0)
-        df[consol] = df[in_range]
-        
+        hldiff = 'high_low_pct_diff'
+        if hldiff not in df.columns:
+            df[hldiff] = abs( (df[self.high]-df[self.low])/((df[self.high]+df[self.low])/2) )
+
+        df[consol]  = df[hldiff].apply(lambda x: 1 if x <= percentage else 0)
+
+
+        ir_list = []
         x0 = 0.0
         for i, row in df.iterrows():
-            row[in_range] = x0*row[in_range] + row[in_range]
-            x0 = row[in_range]
+            x0 =  x0*row[consol] + row[consol]
+            ir_list.append(x0)
+        df[in_range] = ir_list 
         return df 
 
     def calculate_percent_changes(self, df:pd.DataFrame)->pd.DataFrame:
@@ -164,7 +175,9 @@ class BreakoutProcessor(BaseProcessor):
 
     def calculate_growth(self, df)->pd.DataFrame:
         df['growth'] = df[self.close_pct_chg].cumsum()
-        df = self.in_consolidation(df, percentage=self.consolidation_pct_chg, window=self.consolidation_window)
+        df = self.in_consolidation(df, percentage=self.consolidation_pct_chg)
+        df['slope_5'] = df[self.close].rolling(5,min_periods=5).apply(self._calc_slope,raw=False)        
+        df['slope_20']= df[self.close].rolling(20,min_periods=20).apply(self._calc_slope,raw=False)  
         #df = self._mark_bigmoves(df, self.big_move_percentage)
         return df
 
