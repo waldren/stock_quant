@@ -1,0 +1,95 @@
+ # Create a new columen for ADX below 14
+history['adx_below'] = np.zeros(len(history))
+history.loc[history['adx_14'] < 14, 'adx_below'] = 1
+
+
+history.loc[:, 'shaded'] = create_shaded_col(history, 'peaks', history['high'].max(), history['low'].min())
+
+
+history.loc[:, 'shaded2'] = np.where(
+        history['in_consolidation'] + history['consolidating'] == 1,
+        True,
+        False,
+    ) 
+
+# Filter dataframe by index and columns
+keep_cols = ['high', 'low', 'adx_below', 'high_low_pct_diff', 'in_consolidation', 'consolidating', 'in_consolidation_range', 'peaks']
+trunc_hx = history.loc['2018-01-01':'2021-12-31'][keep_cols]
+
+#Select all the number columns and round to 4 decimals
+tmp = trunc_hx.select_dtypes(include=[np.number])
+trunc_hx.loc[:, tmp.columns] = np.round(tmp, 4)
+
+
+def fit_to_line(y:np.array):
+    x = np.arange(1,len(y)+1)
+    return lr(x, y=y)
+
+def has_lower_highs_and_higher_lows(high:np.array, low:np.array):
+    hi_res = fit_to_line(high)
+    logger.debug(f"High Slope is {hi_res.slope}")
+    if hi_res.slope < 0:
+        lo_res = fit_to_line(low)
+        logger.debug(f"Low Slope is {lo_res.slope}")
+        if lo_res.slope > 0:
+            return True
+        else:
+            return False
+    else:
+        return False
+
+def mark_peak_widths(fig:Figure, df:pd.DataFrame)-> pd.DataFrame:
+    lookback_period = 3
+    df_peaks = df.query("peaks == 1 and peaks_prct_move > 1.1")
+    for index, row in df_peaks.iterrows():
+        pk_start = index- timedelta(row['peaks_fullwidth'])
+        fig.add_vrect(x0=pk_start, x1=index+ timedelta(row['peaks_fullwidth']), line_width=1, fillcolor="green", opacity=0.1)
+        
+        step_size = lookback_period
+        max_steps = 5
+
+        consolidate_end = pk_start -timedelta(1)
+        df_test = df.loc[:consolidate_end.strftime('%Y-%m-%d')]
+        max_consolidation = find_consolidation(df_test['high'].to_numpy(), df_test['low'].to_numpy(), step_size=step_size, max_steps=max_steps)
+        if max_consolidation > 0:
+            fig.add_vrect(x0=consolidate_end-timedelta(max_consolidation), x1=consolidate_end, 
+                        line_width=1, fillcolor="yellow", opacity=0.2 )
+        
+        # Check for Volume Spike
+        df_test = df.loc[pk_start:index]
+        vol_spike = where_volume_spike(df_test['volume_pct_chg'].to_numpy())
+        if vol_spike >= 0:
+            vol_idx = df.index[vol_spike]
+            fig.add_vrect(x0=vol_idx, x1=vol_idx, line_width=1, fillcolor="blue", opacity=0.2 )
+
+
+def find_consolidation(high:np.array, low:np.array, step_size=5, max_steps=5)-> int:
+    """
+    Check for consolidation via lower highs and higher lows in steps backward.
+
+    Args:
+        high (np.array): array of high prices
+        low (np.array):  array of low prices
+        step_size (int, optional): Number of trading days to look back per step. Defaults to 5.
+        max_steps (int, optional): Maximum number of steps to take back. Defaults to 5.
+
+    Returns:
+        int: Number of trading days (in multiple of step_size) that there is consolidation. 0 = no consolidation
+    """
+    current_end = -1
+    max_consolidation = 0
+    stop_after = -step_size*max_steps
+    for x in range (1,max_steps):
+        current_start = current_end - step_size
+        if current_start < stop_after:
+            logger.debug(f'{max_consolidation} bars of consolidation in {x} steps')
+            return max_consolidation
+        #Check current range for consolidation
+        if has_lower_highs_and_higher_lows(high=high[current_start:current_end], low=low[current_start:current_end]):
+            max_consolidation = -current_start
+            current_end = current_start
+        else:
+            logger.debug(f'{max_consolidation} bars of consolidation in {x} steps')
+            return max_consolidation
+    logger.debug(f'{max_consolidation} bars of consolidation in {x} steps')
+    return max_consolidation

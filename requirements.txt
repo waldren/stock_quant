@@ -3,6 +3,7 @@ numba
 pandas
 scipy
 pyyaml
+yfinance
 # technical analysis, indicator libraries
 ta
 # ta-lib

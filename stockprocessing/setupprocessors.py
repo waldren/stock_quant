@@ -6,7 +6,7 @@ import logging
 import warnings
 
 from .baseprocessors import BaseProcessor
-from stockprocessing import grove_functions as gf
+from groves import grove_functions as gf
 
 class BreakoutProcessor(BaseProcessor):
     def __init__(self, symbol: str = "", date_col: str = 'dt', open_col: str = 'open', high_col: str = 'high'
@@ -68,6 +68,15 @@ class BreakoutProcessor(BaseProcessor):
         return slope
     ################################
 
+    def _normalize_data(self, data:pd.Series)->pd.Series:
+        min = data.min()
+        max = data.max()
+        
+        # normalization part
+        norm = (data - min) / (max - min)
+        
+        return norm
+
     def find_extrema(self, df):
         if df is None:
             print("apply_extrema: df is None")
@@ -75,7 +84,7 @@ class BreakoutProcessor(BaseProcessor):
         # If we do not break up the dataframe the larger future growth
         # will interfere with peak identification in the more distant past
         #TODO The slicing of the dataframe is arbitrary. Probably need to look 
-        #     for a more emperic method to determin break points. 
+        #     for a more emperic method to determin break points. OR normalize the data
         frames = []
         chunk_size = self.extrema_chunk_size 
         for start in range(0, df.shape[0], chunk_size):
