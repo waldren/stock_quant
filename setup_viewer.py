@@ -142,7 +142,7 @@ if __name__ == "__main__":
     etime = time.perf_counter()
     logger.info(f'Breakoutprocessor took {etime-stime} secs.')
 
-   
+    history.loc[:, 'shaded'] = create_shaded_col(history, 'peaks', history['high'].max(), history['low'].min())
 
     test_chart(symbol, history, row2_columns=['slope_5', 'slope_20'])
 
