@@ -18,14 +18,15 @@ def create_shaded_col(df, filter_col, high, low, filterValue=None)->np.array:
     else:
         return np.where(df[filter_col] > filterValue, high, low, )
 
-def test_chart(symbol:str, df:pd.DataFrame, row2_columns = ['in_consolidation', 'consolidating']):
+def test_chart(symbol:str, df:pd.DataFrame, row2_columns = None):
 
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02)
         fig.add_trace( go.Candlestick(x=df.index, name=symbol, open=df['open'], high=df['high'], 
                         low=df['low'], close=df['close']), row=1, col=1)
 
-        for c in row2_columns:
-            fig.add_trace( go.Line(name=c, x=df.index, y=df[c]), row=2, col=1)
+        if row2_columns is not None:
+            for c in row2_columns:
+                fig.add_trace( go.Line(name=c, x=df.index, y=df[c]), row=2, col=1)
 
         if 'shaded' in df.columns:
             fig.add_trace( go.Scatter(x = df.index, y = df['shaded'],

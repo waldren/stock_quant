@@ -75,7 +75,6 @@ def download_single( td, symbol):
         save_history(f"_{symbol}", df)
 
 if __name__ == '__main__':
-    config = None
     with open('./config.yaml') as f:
         config = yaml.safe_load(f)
 
