@@ -20,7 +20,20 @@ def getstock(symbol)->pd.DataFrame:
 
 def gen_x(df):
     return np.arange(len(df))
-    
+
+
+#%%
+from stockprocessing import analyers as az
+df = az.append_moving_trend_lines(df, window=7)
+
+
+
+
+
+
+
+
+
 #%%
 df = getstock('VLO')
 df = df['2022-03-15':'2022-06-30']

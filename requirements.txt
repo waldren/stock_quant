@@ -16,6 +16,7 @@ cryptography
 # visualization
 plotly
 cufflinks
+nbformat
 # Webdriver
 chromedriver-binary
 

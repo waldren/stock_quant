@@ -5,6 +5,7 @@ import scipy.signal as sig
 import logging 
 import warnings
 from stockprocessing import *
+from groves import trend_lines as tl
 
 logger = logging.getLogger('__name__')
 
@@ -146,3 +147,32 @@ def append_in_percentage_range(df:pd.DataFrame, percentage=0.02):
     df[in_range] = ir_list 
 
     return df 
+
+def _gen_x(df):
+    return np.arange(len(df))
+
+def _find_gradient_resistance(df:pd.DataFrame):
+    m_res, c_res = tl.find_grad_intercept(
+        case = 'resistance', 
+        x = _gen_x(df), 
+        y = tl.heat_eqn_smooth(df['high'].values.copy()),
+    )
+    return f'{m_res}|{c_res}'
+
+def _find_gradient_support(df:pd.DataFrame):
+    m_supp, c_supp = tl.find_grad_intercept(
+        case = 'support', 
+        x = _gen_x(df), 
+        y = tl.heat_eqn_smooth(df['low'].values.copy()),
+    )
+    return f'{m_supp}|{c_supp}'
+
+def append_moving_trend_lines(df:pd.DataFrame, window=7)->pd.DataFrame:
+    df['r_slope_intercept'] = df.rolling(window=window).apply(_find_gradient_resistance)
+    df['resistance_slope'], df['resistance_intercept'] = df['r_slope_intercept'].split("|")
+
+    df['s_slope_intercept'] = df.rolling(window=window).apply(_find_gradient_resistance)
+    df['support_slope'], df['support_intercept'] = df['s_slope_intercept'].split("|")
+
+    df.drop(['r_slope_intercept', 's_slope_intercept'],inplace=True)
+    return df
